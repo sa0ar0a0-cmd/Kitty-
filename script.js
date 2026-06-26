@@ -12,36 +12,42 @@ if ('serviceWorker' in navigator) {
 // ===== STATE =====
 let photos = [];
 let editingId = null;
-let editMode = null; // 'img' | 'desc'
+let editMode = null;
 let pendingImgDataUrl = null;
 let pendingImgForNewCard = null;
 let fabOpen = false;
-let currentPage = 'gallery';
 
-// ===== STORAGE KEYS =====
-const STORAGE_KEY = 'kitty_private_photos';
+// ===== STORAGE KEY =====
+const STORAGE_KEY = 'kitty_private_v2';
 
-// ===== LOAD FROM STORAGE =====
+// ===== LOAD PHOTOS =====
 function loadPhotos() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
-      photos = JSON.parse(raw);
-    } else {
-      // Load default photos from embedded data
-      if (typeof PHOTOS !== 'undefined' && PHOTOS.length > 0) {
-        photos = PHOTOS.map((p, i) => ({
-          id: p.id,
-          src: p.src,
-          desc: getDefaultDesc(i),
-          date: p.date || formatDate(new Date()),
-        }));
-        savePhotos();
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        photos = parsed;
+        return;
       }
     }
-  } catch (e) {
-    photos = [];
-  }
+  } catch (e) { /* ignore */ }
+
+  // Load from embedded PHOTOS data
+  try {
+    if (typeof PHOTOS !== 'undefined' && Array.isArray(PHOTOS) && PHOTOS.length > 0) {
+      photos = PHOTOS.map((p, i) => ({
+        id: p.id,
+        src: p.src,
+        desc: getDefaultDesc(i),
+        date: p.date || formatDate(new Date()),
+      }));
+      savePhotos();
+      return;
+    }
+  } catch (e) { /* ignore */ }
+
+  photos = [];
 }
 
 function getDefaultDesc(i) {
@@ -61,7 +67,7 @@ function getDefaultDesc(i) {
     '💕 زیباتر از هر تصویری',
     '🎀 عزیزترین آدم دنیام',
   ];
-  return descs[i] || '💖 لحظه‌ای خاص از سویتا خانوم';
+  return descs[i % descs.length];
 }
 
 function savePhotos() {
@@ -80,14 +86,13 @@ function formatDate(d) {
 function renderGallery() {
   const grid = document.getElementById('galleryGrid');
   if (!grid) return;
-
   grid.innerHTML = '';
 
-  if (photos.length === 0) {
+  if (!photos || photos.length === 0) {
     grid.innerHTML = `
-      <div class="empty-state" style="grid-column: 1/-1;">
+      <div class="empty-state" style="grid-column:1/-1">
         <div class="empty-icon">🌸</div>
-        <p>هنوز عکسی اضافه نشده<br>با دکمه + عکس اضافه کنید</p>
+        <p>هنوز عکسی بارگذاری نشده<br>صبر کنید یا با + عکس اضافه کنید</p>
       </div>`;
     return;
   }
@@ -95,15 +100,15 @@ function renderGallery() {
   photos.forEach((photo, idx) => {
     const card = document.createElement('div');
     card.className = 'photo-card';
-    card.style.animationDelay = `${idx * 0.06}s`;
+    card.style.animationDelay = idx * 0.06 + 's';
     card.innerHTML = `
       <div class="card-img-wrap">
-        <img src="${photo.src}" alt="عکس سویتا" loading="lazy">
+        <img src="${photo.src}" alt="عکس سویتا" loading="lazy" decoding="async">
         <span class="card-date-badge">${photo.date}</span>
       </div>
       <div class="card-body">
         <div class="card-desc ${photo.desc ? '' : 'empty'}">
-          ${photo.desc || 'توضیحی ندارد'}
+          ${photo.desc || 'بدون توضیح'}
         </div>
         <div class="card-actions">
           <button class="card-btn edit-img" onclick="openEditImg(${photo.id})">🖼️ ویرایش عکس</button>
@@ -134,13 +139,7 @@ function deleteDesc(id) {
   showToast('❌ توضیح حذف شد');
 }
 
-// ===== MODAL LOGIC =====
-function openModal(title, content) {
-  document.getElementById('modalTitle').textContent = title;
-  document.getElementById('modalContent').innerHTML = content;
-  document.getElementById('modalOverlay').classList.add('open');
-}
-
+// ===== MODAL =====
 function closeModal() {
   document.getElementById('modalOverlay').classList.remove('open');
   editingId = null;
@@ -148,7 +147,6 @@ function closeModal() {
   pendingImgDataUrl = null;
 }
 
-// ===== EDIT IMAGE =====
 function openEditImg(id) {
   editingId = id;
   editMode = 'img';
@@ -156,12 +154,8 @@ function openEditImg(id) {
   document.getElementById('modalTitle').textContent = '🖼️ ویرایش عکس';
   document.getElementById('modalContent').innerHTML = `
     <img id="editImgPreview" class="modal-img-preview" src="${p.src}" style="display:block;">
-    <label style="display:block; text-align:center; margin:8px 0;">
-      <button class="btn-primary" onclick="document.getElementById('fileInput').click()" style="width:100%;">
-        📷 انتخاب عکس جدید
-      </button>
-    </label>
-  `;
+    <button class="btn-primary" style="width:100%;margin-top:10px"
+      onclick="document.getElementById('fileInput').click()">📷 انتخاب عکس جدید</button>`;
   document.getElementById('fileInput').onchange = handleEditImgFile;
   document.getElementById('modalOverlay').classList.add('open');
 }
@@ -179,19 +173,17 @@ function handleEditImgFile(e) {
   e.target.value = '';
 }
 
-// ===== EDIT DESC =====
 function openEditDesc(id) {
   editingId = id;
   editMode = 'desc';
   const p = photos.find(x => x.id === id);
   document.getElementById('modalTitle').textContent = '✏️ ویرایش توضیح';
   document.getElementById('modalContent').innerHTML = `
-    <textarea id="editDescInput" class="modal-textarea" placeholder="توضیح خود را بنویسید...">${p.desc || ''}</textarea>
-  `;
+    <textarea id="editDescInput" class="modal-textarea"
+      placeholder="توضیح خود را بنویسید...">${p.desc || ''}</textarea>`;
   document.getElementById('modalOverlay').classList.add('open');
 }
 
-// ===== MODAL SAVE =====
 function saveModal() {
   if (editMode === 'img' && editingId !== null) {
     if (!pendingImgDataUrl) { closeModal(); return; }
@@ -204,24 +196,19 @@ function saveModal() {
   } else if (editMode === 'add-photo') {
     if (!pendingImgForNewCard) { showToast('⚠️ ابتدا عکس انتخاب کنید'); return; }
     const descEl = document.getElementById('newPhotoDesc');
-    const newId = Date.now();
-    photos.unshift({ id: newId, src: pendingImgForNewCard, desc: descEl ? descEl.value.trim() : '', date: formatDate(new Date()) });
-    savePhotos();
-    renderGallery();
-    showToast('🌸 عکس جدید اضافه شد');
+    photos.unshift({ id: Date.now(), src: pendingImgForNewCard, desc: descEl ? descEl.value.trim() : '', date: formatDate(new Date()) });
+    savePhotos(); renderGallery(); showToast('🌸 عکس جدید اضافه شد');
   } else if (editMode === 'add-desc') {
     const inp = document.getElementById('newDescInput');
     if (!inp || !inp.value.trim()) { showToast('⚠️ توضیح نمی‌تواند خالی باشد'); return; }
     if (photos.length === 0) { showToast('⚠️ ابتدا یک عکس اضافه کنید'); return; }
     photos[0].desc = inp.value.trim();
-    savePhotos();
-    renderGallery();
-    showToast('✅ توضیح اضافه شد');
+    savePhotos(); renderGallery(); showToast('✅ توضیح اضافه شد');
   }
   closeModal();
 }
 
-// ===== FAB MENU =====
+// ===== FAB =====
 function toggleFab() {
   fabOpen = !fabOpen;
   document.getElementById('fab').classList.toggle('open', fabOpen);
@@ -231,9 +218,8 @@ function toggleFab() {
 
 function closeFab() {
   fabOpen = false;
-  document.getElementById('fab').classList.remove('open');
-  document.getElementById('fabMenu').classList.remove('open');
-  document.getElementById('fabOverlay').classList.remove('open');
+  ['fab', 'fabMenu', 'fabOverlay'].forEach(id =>
+    document.getElementById(id).classList.remove('open'));
 }
 
 function fabAddPhoto() {
@@ -242,14 +228,10 @@ function fabAddPhoto() {
   pendingImgForNewCard = null;
   document.getElementById('modalTitle').textContent = '📷 افزودن عکس جدید';
   document.getElementById('modalContent').innerHTML = `
-    <label style="display:block; text-align:center; margin-bottom:10px;">
-      <button class="btn-secondary" onclick="document.getElementById('fileInput').click()" style="width:100%;">
-        🖼️ انتخاب از گالری
-      </button>
-    </label>
+    <button class="btn-secondary" style="width:100%;margin-bottom:10px"
+      onclick="document.getElementById('fileInput').click()">🖼️ انتخاب از گالری</button>
     <img id="newImgPreview" class="modal-img-preview">
-    <textarea id="newPhotoDesc" class="modal-textarea" placeholder="توضیح (اختیاری)..."></textarea>
-  `;
+    <textarea id="newPhotoDesc" class="modal-textarea" placeholder="توضیح (اختیاری)..."></textarea>`;
   document.getElementById('fileInput').onchange = handleNewPhotoFile;
   document.getElementById('modalOverlay').classList.add('open');
 }
@@ -273,62 +255,49 @@ function fabAddDesc() {
   editMode = 'add-desc';
   document.getElementById('modalTitle').textContent = '✏️ افزودن توضیح';
   document.getElementById('modalContent').innerHTML = `
-    <p style="font-size:0.85rem; color:var(--text-soft); margin-bottom:10px; direction:rtl;">توضیح برای اولین عکس اضافه می‌شود</p>
-    <textarea id="newDescInput" class="modal-textarea" placeholder="توضیح خود را بنویسید..."></textarea>
-  `;
+    <p style="font-size:.85rem;color:var(--text-soft);margin-bottom:10px;direction:rtl">برای اولین عکس</p>
+    <textarea id="newDescInput" class="modal-textarea" placeholder="توضیح خود را بنویسید..."></textarea>`;
   document.getElementById('modalOverlay').classList.add('open');
 }
 
 function fabChooseGallery() {
   closeFab();
-  editMode = 'add-photo';
-  pendingImgForNewCard = null;
-  document.getElementById('fileInput').onchange = handleNewPhotoFile;
-  document.getElementById('fileInput').click();
-  // After selection show modal
-  setTimeout(() => {
-    if (pendingImgForNewCard) {
-      document.getElementById('modalTitle').textContent = '📷 افزودن عکس جدید';
-      document.getElementById('modalContent').innerHTML = `
-        <img id="newImgPreview" class="modal-img-preview" src="${pendingImgForNewCard}" style="display:block;">
-        <textarea id="newPhotoDesc" class="modal-textarea" placeholder="توضیح (اختیاری)..."></textarea>
-      `;
-      document.getElementById('modalOverlay').classList.add('open');
-    }
-  }, 500);
+  fabAddPhoto();
 }
 
 // ===== PAGE NAVIGATION =====
 function showPage(name) {
-  currentPage = name;
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
   const pg = document.getElementById('page-' + name);
   const btn = document.getElementById('nav-' + name);
   if (pg) pg.classList.add('active');
   if (btn) btn.classList.add('active');
-  // Show/hide FAB
-  document.getElementById('fab').style.display = name === 'gallery' ? 'flex' : 'none';
-  document.getElementById('fabMenu').style.display = name === 'gallery' ? 'flex' : 'none';
+  const fab = document.getElementById('fab');
+  const fabMenu = document.getElementById('fabMenu');
+  if (fab) fab.style.display = name === 'gallery' ? 'flex' : 'none';
+  if (fabMenu) fabMenu.style.display = name === 'gallery' ? 'flex' : 'none';
   closeFab();
 }
 
 // ===== TOAST =====
 function showToast(msg) {
   const t = document.getElementById('toast');
+  if (!t) return;
   t.textContent = msg;
   t.classList.add('show');
   setTimeout(() => t.classList.remove('show'), 2500);
 }
 
-// ===== SPLASH SCREEN =====
+// ===== SPLASH =====
 function startSplash() {
   const titleEl = document.getElementById('splashTitle');
+  if (!titleEl) return;
   const text = 'Kitty Sevita';
   let i = 0;
   titleEl.innerHTML = '<span class="splash-cursor">|</span>';
 
-  function typeNext() {
+  const typeNext = () => {
     if (i < text.length) {
       titleEl.innerHTML = text.slice(0, i + 1) + '<span class="splash-cursor">|</span>';
       i++;
@@ -336,11 +305,10 @@ function startSplash() {
     } else {
       setTimeout(hideSplash, 1200);
     }
-  }
+  };
 
-  // Float hearts on splash
   createSplashHearts();
-  setTimeout(typeNext, 700);
+  setTimeout(typeNext, 800);
 }
 
 function createSplashHearts() {
@@ -362,20 +330,19 @@ function createSplashHearts() {
 function hideSplash() {
   const splash = document.getElementById('splash');
   const app = document.getElementById('app');
-  splash.classList.add('fade-out');
-  app.classList.add('visible');
-  setTimeout(() => { splash.classList.add('hidden'); }, 900);
+  if (splash) splash.classList.add('fade-out');
+  if (app) { app.classList.add('visible'); app.removeAttribute('aria-hidden'); }
+  setTimeout(() => { if (splash) splash.classList.add('hidden'); }, 900);
 }
 
-// ===== DECO HEARTS =====
 function createDecoHearts() {
   const container = document.querySelector('.deco-hearts');
   if (!container) return;
-  const emojis = ['❤', '♡', '✿', '✦'];
+  const chars = ['❤', '♡', '✿', '✦'];
   for (let i = 0; i < 10; i++) {
     const h = document.createElement('span');
     h.className = 'deco-heart';
-    h.textContent = emojis[Math.floor(Math.random() * emojis.length)];
+    h.textContent = chars[Math.floor(Math.random() * chars.length)];
     h.style.left = Math.random() * 100 + '%';
     h.style.animationDuration = (10 + Math.random() * 20) + 's';
     h.style.animationDelay = Math.random() * 15 + 's';
@@ -384,16 +351,15 @@ function createDecoHearts() {
   }
 }
 
-// ===== INIT =====
-document.addEventListener('DOMContentLoaded', () => {
+// ===== INIT — use window.onload to ensure photos_data.js is fully parsed =====
+window.addEventListener('load', () => {
   loadPhotos();
   renderGallery();
   startSplash();
   createDecoHearts();
   showPage('gallery');
 
-  // Modal close on overlay click
   document.getElementById('modalOverlay').addEventListener('click', e => {
-    if (e.target === document.getElementById('modalOverlay')) closeModal();
+    if (e.target.id === 'modalOverlay') closeModal();
   });
 });
